@@ -7,7 +7,6 @@ const querystring = require('querystring');
 
 const PORT = 3000;
 
-// Database connection settings
 const dbConfig = {
     host: 'localhost',
     user: 'root',
@@ -24,6 +23,18 @@ async function addItemToDatabase(text) {
         return result.insertId;
     } catch (error) {
         console.error('Error adding item:', error);
+        throw error;
+    }
+}
+
+async function deleteItemFromDatabase(id) {
+    try {
+        const connection = await mysql.createConnection(dbConfig);
+        const query = 'DELETE FROM items WHERE id = ?';
+        await connection.execute(query, [id]);
+        await connection.end();
+    } catch (error) {
+        console.error('Error deleting item:', error);
         throw error;
     }
 }
@@ -47,13 +58,16 @@ async function getHtmlRows() {
         <tr>
             <td>${item.id}</td>
             <td>${item.text}</td>
-            <td><button onclick="removeItem(${item.id})">Remove</button></td>
+            <td><button onclick="deleteItem(${item.id})">Remove</button></td>
         </tr>
     `).join('');
 }
 
 async function handleRequest(req, res) {
-    if (req.url === '/' && req.method === 'GET') {
+    const parsedUrl = url.parse(req.url);
+    const pathname = parsedUrl.pathname;
+
+    if (pathname === '/' && req.method === 'GET') {
         try {
             const html = await fs.promises.readFile(
                 path.join(__dirname, 'index.html'), 
@@ -67,7 +81,7 @@ async function handleRequest(req, res) {
             res.writeHead(500, { 'Content-Type': 'text/plain' });
             res.end('Error loading index.html');
         }
-    } else if (req.url === '/add' && req.method === 'POST') {
+    } else if (pathname === '/add' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => {
             body += chunk.toString();
@@ -87,6 +101,28 @@ async function handleRequest(req, res) {
                 console.error(error);
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: false, message: 'Error adding item' }));
+            }
+        });
+    } else if (pathname === '/delete' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', async () => {
+            try {
+                const { id } = querystring.parse(body);
+                if (!id || isNaN(id)) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ success: false, message: 'Invalid ID' }));
+                }
+                
+                await deleteItemFromDatabase(id);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                console.error(error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, message: 'Error deleting item' }));
             }
         });
     } else {
